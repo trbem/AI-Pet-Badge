@@ -1,0 +1,16 @@
+{
+  "idf.currentSetup": "C:\\Espressif\\v5.5.3\\esp-idf",
+  "idf.enableIdfComponentManager": true,
+  "idf.buildPath": "build",
+  "idf.ninjaArgs": [
+    "-j",
+    "6"
+  ],
+  "idf.extensionActivationMode": "always",
+  "idf.customTerminalExecutable": "C:\\Users\\34262\\AppData\\Local\\Microsoft\\WindowsApps\\Microsoft.PowerShell_8wekyb3d8bbwe\\pwsh.exe",
+  "idf.customTerminalExecutableArgs": [
+    "-NoProfile"
+  ],
+  "C_Cpp.default.compilerPath": "C:\\Espressif\\tools\\xtensa-esp-elf\\esp-14.2.0_20251107\\xtensa-esp-elf\\bin\\xtensa-esp32s3-elf-gcc.exe",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json"
+}
