@@ -44,8 +44,14 @@ static lv_obj_t *character_image;
 static lv_obj_t *status_label;
 static lv_image_dsc_t images[2];
 static uint8_t *pixels[2];
+static uint32_t idle_clip = UINT32_MAX;
+static uint32_t next_action_clip;
+static TaskHandle_t animation_task_handle;
 static volatile uint32_t requested_clip;
 static volatile uint32_t clip_revision;
+static volatile uint32_t current_clip;
+static volatile uint32_t current_frame;
+static volatile bool animation_playing;
 static volatile uint32_t touch_count;
 static volatile uint32_t displayed_frames;
 static volatile uint32_t decode_time_us;
@@ -68,7 +74,9 @@ static esp_err_t check_assets(void)
         if (!memchr(clips[i].name, 0, sizeof(clips[i].name)) || !clips[i].count ||
             clips[i].first >= pack->frame_count || clips[i].count > pack->frame_count - clips[i].first)
             return ESP_ERR_INVALID_SIZE;
+        if (!strcmp(clips[i].name, "sit")) idle_clip = i;
     }
+    if (idle_clip == UINT32_MAX) return ESP_ERR_NOT_FOUND;
     for (uint32_t i = 0; i < pack->frame_count; ++i) {
         if (!frames[i].length || frames[i].offset < table_end || frames[i].offset > length ||
             frames[i].length > length - frames[i].offset) return ESP_ERR_INVALID_SIZE;
@@ -78,25 +86,28 @@ static esp_err_t check_assets(void)
     return ESP_OK;
 }
 
-static void next_clip(void)
+static void request_next_action(void)
 {
-    requested_clip = (requested_clip + 1) % pack->clip_count;
+    requested_clip = next_action_clip;
+    next_action_clip = (next_action_clip + 1) % pack->clip_count;
     ++clip_revision;
+    if (animation_task_handle) xTaskNotifyGive(animation_task_handle);
 }
 
 static void on_touch(lv_event_t *event)
 {
     (void)event;
     ++touch_count;
-    next_clip();
+    request_next_action();
     ESP_LOGI(TAG, "Touch #%u -> %s", (unsigned)touch_count, clips[requested_clip].name);
 }
 
 static void print_status(void)
 {
-    printf("BADGE_STATUS {\"clip\":\"%s\",\"frames\":%u,\"touches\":%u,\"decode_us\":%u,"
+    printf("BADGE_STATUS {\"clip\":\"%s\",\"playing\":%s,\"frame_index\":%u,\"frames\":%u,\"touches\":%u,\"decode_us\":%u,"
            "\"heap\":%u,\"min_heap\":%u,\"psram\":%u}\n",
-           clips[requested_clip].name, (unsigned)displayed_frames, (unsigned)touch_count,
+           clips[current_clip].name, animation_playing ? "true" : "false", (unsigned)current_frame,
+           (unsigned)displayed_frames, (unsigned)touch_count,
            (unsigned)decode_time_us, (unsigned)esp_get_free_heap_size(),
            (unsigned)esp_get_minimum_free_heap_size(),
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
@@ -146,7 +157,7 @@ static void command_task(void *arg)
         if (byte == '\n') {
             line[used] = 0;
             if (!strcmp(line, "STATUS")) print_status();
-            else if (!strcmp(line, "NEXT")) { next_clip(); print_status(); }
+            else if (!strcmp(line, "NEXT")) { request_next_action(); print_status(); }
             else if (!strcmp(line, "TONE")) diagnostic_tone();
             else if (used) printf("BADGE_ERROR unknown command\n");
             used = 0;
@@ -162,15 +173,25 @@ static void animation_task(void *arg)
     (void)arg;
     tinfl_decompressor *inflater = heap_caps_malloc(sizeof(*inflater), MALLOC_CAP_8BIT);
     assert(inflater);
-    uint32_t index = 0, revision = UINT32_MAX;
+    uint32_t selected = idle_clip;
+    uint32_t index = clips[idle_clip].count - 1, revision = 0;
+    bool playing = false, needs_frame = true;
     unsigned slot = 0;
     int64_t previous_frame = esp_timer_get_time();
-    int64_t last_report = previous_frame;
-    uint32_t previous_count = 0;
     while (true) {
-        uint32_t selected = requested_clip;
         bool changed = revision != clip_revision;
-        if (changed) { index = 0; revision = clip_revision; }
+        if (changed) {
+            selected = requested_clip;
+            index = 0;
+            revision = clip_revision;
+            playing = true;
+            needs_frame = true;
+            previous_frame = esp_timer_get_time();
+        }
+        if (!needs_frame) {
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            continue;
+        }
         const pack_clip_t *clip = &clips[selected];
         const pack_frame_t *frame = &frames[clip->first + index];
         int64_t started = esp_timer_get_time();
@@ -189,24 +210,31 @@ static void animation_task(void *arg)
         bsp_display_lock(-1);
         lv_image_cache_drop(&images[slot]);
         lv_image_set_src(character_image, &images[slot]);
-        if (changed) lv_label_set_text(status_label, "待机中 · 轻触切换动作");
+        lv_label_set_text(status_label, playing ? "动作中" : "待机中 · 轻触切换动作");
         lv_obj_invalidate(character_image);
         bsp_display_unlock();
+        current_clip = selected;
+        current_frame = index;
+        animation_playing = playing;
         slot ^= 1;
         ++displayed_frames;
-        if (++index >= clip->count) { next_clip(); index = 0; }
-        int64_t now = esp_timer_get_time();
-        if (now - last_report >= 10000000) {
-            float fps = (displayed_frames - previous_count) * 1000000.0f / (now - last_report);
-            ESP_LOGI(TAG, "Playback %.1f fps; decode %.1f ms; heap %u; minimum %u", fps,
-                     decode_time_us / 1000.0f, (unsigned)esp_get_free_heap_size(),
-                     (unsigned)esp_get_minimum_free_heap_size());
-            previous_count = displayed_frames;
-            last_report = now;
+        if (playing) {
+            if (++index >= clip->count) {
+                ESP_LOGI(TAG, "Action %s completed; returning to seated idle", clip->name);
+                playing = false;
+                selected = idle_clip;
+                index = clips[idle_clip].count - 1;
+            }
+        } else {
+            needs_frame = false;
+            ESP_LOGI(TAG, "Seated idle: sit[%u], frame updates paused", (unsigned)index);
         }
+        int64_t now = esp_timer_get_time();
         int64_t deadline = previous_frame + 1000000 / pack->fps;
-        if (deadline > now) vTaskDelay(pdMS_TO_TICKS((deadline - now) / 1000));
-        else vTaskDelay(1);
+        if (needs_frame) {
+            if (deadline > now) vTaskDelay(pdMS_TO_TICKS((deadline - now) / 1000));
+            else vTaskDelay(1);
+        }
         previous_frame = esp_timer_get_time();
     }
 }
@@ -220,6 +248,8 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(result);
     ESP_ERROR_CHECK(check_assets());
+    requested_clip = current_clip = idle_clip;
+    current_frame = clips[idle_clip].count - 1;
     for (int i = 0; i < 2; ++i) {
         pixels[i] = heap_caps_malloc(FRAME_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         assert(pixels[i]);
@@ -253,6 +283,6 @@ void app_main(void)
     lv_obj_align(status_label, LV_ALIGN_BOTTOM_MID, 0, -22);
     bsp_display_unlock();
     ESP_LOGI(TAG, "Elysia animation prototype ready; USB commands: STATUS, NEXT, TONE");
-    assert(xTaskCreatePinnedToCore(animation_task, "animation", 8192, NULL, 3, NULL, 1) == pdPASS);
+    assert(xTaskCreatePinnedToCore(animation_task, "animation", 8192, NULL, 3, &animation_task_handle, 1) == pdPASS);
     assert(xTaskCreate(command_task, "commands", 6144, NULL, 2, NULL) == pdPASS);
 }
