@@ -16,7 +16,8 @@ def main():
     parser.add_argument("--port", required=True)
     parser.add_argument("--seconds", type=float, default=10)
     parser.add_argument("--reset", action="store_true")
-    parser.add_argument("--command", choices=("STATUS", "NEXT", "TONE"))
+    parser.add_argument("--command", choices=("STATUS", "NEXT", "TONE", "DASH"))
+    parser.add_argument("--sync-time", action="store_true", help="Set the clock from this computer and update the board RTC")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     port = serial.Serial(port=None, baudrate=115200, timeout=0.2)
@@ -28,8 +29,11 @@ def main():
         port.open()
         if args.reset:
             HardReset(port, uses_usb=True)()
-            if args.command:
+            if args.command or args.sync_time:
                 time.sleep(3)
+        if args.sync_time:
+            port.write(f"TIME {int(time.time())}\n".encode("ascii"))
+            port.flush()
         if args.command:
             port.write((args.command + "\n").encode("ascii"))
             port.flush()

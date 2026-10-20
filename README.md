@@ -1,15 +1,27 @@
 # AI Pet Badge · 爱莉希雅桌面陪伴原型
 
-基于微雪 ESP32-S3-Touch-LCD-1.85B 的课程项目。当前固件实现淡粉背景的角色动画、坐姿静止待机与触摸互动；中文语音对话将在后续阶段接入。
+基于微雪 ESP32-S3-Touch-LCD-1.85B 的课程项目。当前固件实现粉紫色圆屏、完整中文角色名、时间日期、深圳天气，以及坐姿待机和触摸动画；中文语音对话将在后续阶段接入。
 
 ## 硬件与显示
 
 - 360 × 360 圆屏，16 MiB Flash，8 MiB PSRAM。
-- 行走、跳跃、坐下三个动作，视频去绿幕后统一画布和比例，目标 15 FPS。
-- 素材暂存 Flash，逐帧 zlib 压缩，使用两个 PSRAM 图像缓冲；不依赖 TF 卡。
+- 行走、跳跃、坐下三个动作，视频去绿幕后按站姿身高、脚底位置对齐，目标 24 FPS。
+- 固定背景、卡片和阴影预先合成，运行时更新角色与实时文字；当前完整界面实测约 22 FPS。
+- 素材暂存 Flash，逐帧 zlib 压缩，使用两个 PSRAM 显示缓冲及一个过渡缓冲；不依赖 TF 卡。
 - 开机停留在坐下素材的最后一帧；待机时停止解码和刷新动画。
-- 点击播放一个动作，按行走、跳跃、坐下依次选择；每次只播放一遍，结束后回到坐姿静止。
-- USB 诊断命令为 STATUS、NEXT、TONE。TONE 只用于手动扬声器测试。
+- 点击按行走、跳跃、坐下依次选择互动：先起身，再执行一次动作，最后坐下静止。坐下互动为起身后再次坐下。
+- 起身复用坐下素材倒放；删去原视频开头、结尾的长停顿，相邻站姿用约 0.25 秒缓动混合衔接。
+- 动作途中点击不会截断当前动作；只保留最后一次待执行请求，坐下后再开始，避免连续点击积压。
+- 中文名字使用完整的四字字体子集，天气使用独立图标；字体来源与许可见 firmware/ai_pet_badge/licenses/fonts。
+- USB 诊断命令为 STATUS、NEXT、TONE、DASH、SHOT、TIME。TONE 只用于手动扬声器测试。
+
+## 时间与天气
+
+复制 .env.wifi.example 为本地 .env.wifi，填写 WIFI_SSID 和 WIFI_PASSWORD 后重新构建。使用 2.4 GHz 网络；构建脚本生成的 wifi_config.h 与本地配置均被 Git 忽略。生成的设备固件含网络配置，应留在本地。
+
+联网后通过 NTP 校准北京时间，并写入板上 PCF85063A 时钟。时钟有效时，重启会优先从 RTC 恢复；断电后 RTC 数据无效则等待重新校时。未校准时显示占位符。
+
+天气来自 [Open-Meteo](https://open-meteo.com/en/docs)，显示深圳的当前温度、天气描述和图标，每 15 分钟更新；请求失败每分钟重试。接口数据为天气模型的当前条件。无数据时显示同步状态，数据超过一小时显示“待更新”。城市坐标配置位于 badge_network.c。TLS 使用 ESP-IDF 证书包验证服务器。
 
 ## 构建与烧录
 
@@ -25,11 +37,22 @@ py -3.11 -m venv .venv
 
 素材目录中需要 walk.mp4、jump.mp4、sit.mp4；素材包已生成时可以省略 -AssetSource。COM9 是本次实机识别结果，其他机器请先确认端口。脚本按本次构建产生的 flash_args 烧录。
 
+转换参数针对当前 donz 素材：sit.mp4 取 1.0–3.1 秒并以 1.4 倍速播放，站姿高 190 像素、脚底位于 y=310，为表盘和天气卡片留出空间。更换视频时调整 tools/prepare_badge_assets.py 的参数并检查 artifacts/assets/preview 中的 sequence-*.webp 和 aligned-poses.png，避免人物越界或姿势不匹配。
+
 ```powershell
 . .\tools\Enter-Idf.ps1
 python tools\board_console.py --port COM9 --reset --seconds 15 --output artifacts\boot.log
 python tools\board_console.py --port COM9 --command STATUS --seconds 3 --output artifacts\status.log
+python tools\board_console.py --port COM9 --command DASH --seconds 3 --output artifacts\dashboard.log
+# Optional: set the clock from this computer when NTP is unavailable.
+python tools\board_console.py --port COM9 --sync-time --seconds 3 --output artifacts\clock.log
+# Capture the real LVGL screen with the desktop .venv.
+.\.venv\Scripts\python.exe tools\capture_badge.py --port COM9 --output artifacts\screen.png
 ```
+
+STATUS 包含 stage、action、pending、completed 和 late_frames，可观察起身、动作、坐下的顺序及帧调度是否超时；frames 在坐姿待机时应保持不变。该计数反映提交给 LVGL 的帧，屏幕观感仍需实机确认。
+
+字体子集已包含在源码中。如修改界面文字，在已下载固定版本 LVGL 组件的工程中运行 npm install --prefix tools/fonts，再用 .venv 执行 tools/prepare_badge_fonts.py。请同步保留上游字体许可。
 
 ## 目录
 

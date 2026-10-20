@@ -11,13 +11,15 @@ $badgePack = Join-Path $badgeProject 'main\animations.badge'
 if ($AssetSource) {
     $assetPython = Join-Path $badgeRoot '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $assetPython)) { throw 'Create .venv and install tools/requirements-assets.txt first.' }
-    & $assetPython (Join-Path $PSScriptRoot 'prepare_badge_assets.py') --source $AssetSource --output $badgePack --preview-dir (Join-Path $badgeRoot 'artifacts\assets\preview') --fps 15
+    & $assetPython (Join-Path $PSScriptRoot 'prepare_badge_assets.py') --source $AssetSource --output $badgePack --preview-dir (Join-Path $badgeRoot 'artifacts\assets\preview') --fps 24
     if ($LASTEXITCODE -ne 0) { throw 'Animation conversion failed.' }
 }
 if (-not (Test-Path -LiteralPath $badgePack)) { throw 'Animation pack missing. Supply -AssetSource with walk.mp4, jump.mp4 and sit.mp4.' }
 . (Join-Path $PSScriptRoot 'Enter-Idf.ps1')
 python (Join-Path $PSScriptRoot 'normalize_lock_paths.py')
 if ($LASTEXITCODE -ne 0) { throw 'Component-path normalization failed.' }
+python (Join-Path $PSScriptRoot 'configure_badge_network.py')
+if ($LASTEXITCODE -ne 0) { throw 'Network configuration failed.' }
 python (Join-Path $env:IDF_PATH 'tools\idf.py') -C $badgeProject reconfigure
 if ($LASTEXITCODE -ne 0) { throw 'ESP-IDF configure failed.' }
 cmake --build (Join-Path $badgeProject 'build') --parallel $Jobs

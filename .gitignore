@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+!.env.wifi.example
+**/wifi_config.h
+**/node_modules/
 __pycache__/
 *.py[cod]
 vendor/

@@ -1,0 +1,16 @@
+#pragma once
+#include <stdbool.h>
+#include <time.h>
+#include "lvgl.h"
+
+void badge_dashboard_create(lv_obj_t *screen);
+void badge_dashboard_start(void);
+void badge_dashboard_motion(bool playing);
+void badge_dashboard_pending(bool pending);
+void badge_dashboard_connection(bool connected);
+void badge_dashboard_weather(float temperature, int code, bool day, time_t observed);
+void badge_dashboard_set_time(time_t epoch);
+bool badge_dashboard_time_valid(void);
+void badge_dashboard_status(void);
+void badge_dashboard_snapshot(void);
+void badge_network_start(void);
