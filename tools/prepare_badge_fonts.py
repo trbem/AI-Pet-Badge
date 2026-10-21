@@ -7,6 +7,7 @@ main = root / 'firmware/ai_pet_badge/main'
 source = main.parent / 'managed_components/lvgl__lvgl/scripts/built_in_font'
 converter = root / 'tools/fonts/node_modules/lv_font_conv/lv_font_conv.js'
 symbols = '爱莉希雅深圳天气晴多云阴雾小中大暴雨雪雷阵冻毛毛冰雹待同步更新缓存未联网连接校时月日周一二三四五六年月陪伴动作休息轻触互动稍后已记下在你身边正在准备°℃·'
+symbols += '头晕恢复'
 fonts = [
     ('badge_ui_14', 'SourceHanSansSC-Normal.otf', 14, symbols, '0x20-0x7e'),
     ('badge_name_20', 'SourceHanSansSC-Normal.otf', 20, '爱莉希雅', None),

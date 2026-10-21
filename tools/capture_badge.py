@@ -10,6 +10,8 @@ import serial
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--port', required=True)
 parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--before', choices=('NEXT', 'IMU BENCH'), help='Run a bounded diagnostic before capturing')
+parser.add_argument('--delay', type=float, default=0, help='Seconds to wait before SHOT')
 args = parser.parse_args()
 port = serial.Serial(port=None, baudrate=115200, timeout=0.2)
 port.dtr = False
@@ -18,6 +20,12 @@ port.port = args.port
 try:
     port.open()
     port.reset_input_buffer()
+    if args.before:
+        port.write((args.before+'\n').encode('ascii'))
+        port.flush()
+    if args.delay > 0:
+        time.sleep(args.delay)
+        port.reset_input_buffer()
     port.write(b'SHOT\n')
     deadline = time.monotonic() + 20
     header = None

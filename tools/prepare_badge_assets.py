@@ -14,7 +14,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 MAGIC = b"BDGZ565\0"
-HEADER = struct.Struct("<8s6I")
+HEADER = struct.Struct("<8s10I")
 CLIP = struct.Struct("<16sII")
 FRAME = struct.Struct("<II")
 SIZE = 360
@@ -27,6 +27,7 @@ SIT_START = 1.0
 SIT_END = 3.1
 SIT_SPEED = 1.4
 BLEND_SECONDS = 0.25
+ROI = (104, 80, 160, 256)
 
 
 def decode(path: Path, fps: int, *, sitting: bool = False) -> list[np.ndarray]:
@@ -158,9 +159,17 @@ def main() -> None:
                                                np.maximum(clean[:, :, 0][fringe], clean[:, :, 2][fringe]))
             foreground = Image.fromarray(np.dstack((clean, alpha))).crop(tuple(bounds))
             foreground = foreground.resize(shape, Image.Resampling.LANCZOS)
-            canvas = background.copy()
-            canvas.paste(foreground, position, foreground)
-            raw = encode565(canvas)
+            layer = Image.new('RGBA', (SIZE, SIZE))
+            layer.paste(foreground, position)
+            rx, ry, rw, rh = ROI
+            box = layer.getbbox()
+            if box and (box[0] < rx or box[1] < ry or box[2] > rx + rw or box[3] > ry + rh):
+                raise ValueError(f"Character exceeds sprite ROI: {name}, {box}")
+            sprite = layer.crop((rx, ry, rx + rw, ry + rh))
+            rgba = np.asarray(sprite).copy()
+            rgba[rgba[:, :, 3] == 0, :3] = 0
+            raw = encode565(Image.fromarray(rgba[:, :, :3])) + rgba[:, :, 3].tobytes()
+            canvas = Image.alpha_composite(background.convert('RGBA'), layer).convert('RGB')
             block = zlib.compress(raw, level=9)
             if zlib.decompress(block) != raw:
                 raise ValueError("Frame compression failed round-trip verification")
@@ -174,12 +183,18 @@ def main() -> None:
         ImageDraw.Draw(tile).text((130, 330), name, fill=(100, 54, 86))
         preview_tiles.append(tile)
     offset = HEADER.size + len(descriptors) * CLIP.size + len(compressed) * FRAME.size
-    pack = bytearray(HEADER.pack(MAGIC, 1, SIZE, SIZE, args.fps, len(descriptors), len(compressed)))
+    backdrop = zlib.compress(encode565(background), level=9)
+    background_offset = offset
+    offset += len(backdrop)
+    pack = bytearray(HEADER.pack(MAGIC, 2, ROI[2], ROI[3], args.fps,
+                                len(descriptors), len(compressed), ROI[0], ROI[1],
+                                background_offset, len(backdrop)))
     for name, first, count in descriptors:
         pack.extend(CLIP.pack(name.encode("ascii"), first, count))
     for block in compressed:
         pack.extend(FRAME.pack(offset, len(block)))
         offset += len(block)
+    pack.extend(backdrop)
     for block in compressed:
         pack.extend(block)
     if len(pack) != offset:
@@ -201,7 +216,8 @@ def main() -> None:
     for index, tile in enumerate(joins):
         sheet.paste(tile, (index * SIZE, 0))
     sheet.save(args.preview_dir / "aligned-poses.png")
-    manifest = {"format": "BDGZ565-v1", "size": [SIZE, SIZE], "fps": args.fps,
+    manifest = {"format": "BDGZ565-v2", "size": [SIZE, SIZE], "sprite_roi": ROI,
+                "pixel_format": "RGB565_LE+A8 planes", "fps": args.fps,
                 "frames": len(compressed), "bytes": len(pack), "sha256": hashlib.sha256(pack).hexdigest(),
                 "standing_height": STANDING_HEIGHT, "ground_y": GROUND_Y,
                 "transforms": transforms,

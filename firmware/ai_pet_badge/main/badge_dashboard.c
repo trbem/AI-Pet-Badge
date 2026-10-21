@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 #include <sys/time.h>
 #include "badge_dashboard.h"
 #include "bsp/esp-bsp.h"
@@ -20,7 +21,9 @@ static lv_obj_t *clock_label, *date_label, *day_label, *name_label, *temp_label;
 static lv_obj_t *weather_label, *weather_icon, *motion_label, *hint_label, *connection_dot;
 static pcf85063a_dev_t rtc;
 static bool rtc_ready;
-static volatile bool moving, pending;
+static volatile bool moving, pending, dizzy, recovering;
+static _Atomic uint32_t revision = 1;
+static uint32_t previous_dot = 0xC8B8D2, previous_icon = 0xB1A7CC;
 static portMUX_TYPE state_mux = portMUX_INITIALIZER_UNLOCKED;
 static struct {
     bool connected, weather_valid, day;
@@ -41,7 +44,7 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, 
 
 static void text_if_changed(lv_obj_t *obj, const char *text)
 {
-    if (strcmp(lv_label_get_text(obj), text)) lv_label_set_text(obj, text);
+    if (strcmp(lv_label_get_text(obj), text)) { lv_label_set_text(obj, text); ++revision; }
 }
 
 static lv_obj_t *card(lv_obj_t *parent, int x, int y, int width, int height)
@@ -95,9 +98,13 @@ static void refresh(lv_timer_t *timer)
     int code = state.code;
     time_t observed = state.observed;
     portEXIT_CRITICAL(&state_mux);
-    lv_obj_set_style_bg_color(connection_dot, lv_color_hex(connected ? 0x79B5A7 : 0xC8B8D2), 0);
-    text_if_changed(motion_label, moving ? "动作中" : "陪伴中");
-    text_if_changed(hint_label, pending ? "已记下" : "轻触互动");
+    uint32_t dot = connected ? 0x79B5A7 : 0xC8B8D2;
+    if (dot != previous_dot) {
+        lv_obj_set_style_bg_color(connection_dot, lv_color_hex(dot), 0);
+        previous_dot = dot; ++revision;
+    }
+    text_if_changed(motion_label, recovering ? "恢复中" : dizzy ? "头晕中" : moving ? "动作中" : "陪伴中");
+    text_if_changed(hint_label, dizzy ? "稍后互动" : pending ? "已记下" : "轻触互动");
     if (valid) {
         snprintf(text, sizeof(text), "%.0f°C", temperature);
         text_if_changed(temp_label, text);
@@ -109,7 +116,10 @@ static void refresh(lv_timer_t *timer)
         else if ((code >= 71 && code <= 77) || code == 85 || code == 86) icon = "\xEF\x8B\x9C";
         else if (code >= 51) { icon = "\xEF\x83\xA9"; color = 0x8DADD0; }
         text_if_changed(weather_icon, icon);
-        lv_obj_set_style_text_color(weather_icon, lv_color_hex(color), 0);
+        if (color != previous_icon) {
+            lv_obj_set_style_text_color(weather_icon, lv_color_hex(color), 0);
+            previous_icon = color; ++revision;
+        }
     } else {
         text_if_changed(weather_label, connected ? (badge_dashboard_time_valid() ? "更新中" : "校时中") : "联网中");
     }
@@ -153,7 +163,7 @@ void badge_dashboard_create(lv_obj_t *screen)
     lv_obj_remove_flag(connection_dot, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t *footer = label(screen, &badge_ui_14, 0xB299B9, "在你身边");
     lv_obj_align(footer, LV_ALIGN_BOTTOM_MID, 0, -9);
-    lv_timer_create(refresh, 1000, NULL);
+    lv_timer_create(refresh, 100, NULL);
 }
 
 void badge_dashboard_start(void)
@@ -191,6 +201,8 @@ void badge_dashboard_set_time(time_t epoch)
 
 void badge_dashboard_motion(bool playing) { moving = playing; }
 void badge_dashboard_pending(bool value) { pending = value; }
+void badge_dashboard_dizzy(bool value, bool recovery) { dizzy = value; recovering = recovery; }
+uint32_t badge_dashboard_revision(void) { return atomic_load_explicit(&revision,memory_order_relaxed); }
 void badge_dashboard_connection(bool value)
 {
     portENTER_CRITICAL(&state_mux); state.connected = value; portEXIT_CRITICAL(&state_mux);

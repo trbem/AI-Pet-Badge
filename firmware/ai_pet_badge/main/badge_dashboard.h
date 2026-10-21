@@ -7,6 +7,8 @@ void badge_dashboard_create(lv_obj_t *screen);
 void badge_dashboard_start(void);
 void badge_dashboard_motion(bool playing);
 void badge_dashboard_pending(bool pending);
+void badge_dashboard_dizzy(bool dizzy, bool recovering);
+uint32_t badge_dashboard_revision(void); /* Atomic hint; widget reads still require display lock. */
 void badge_dashboard_connection(bool connected);
 void badge_dashboard_weather(float temperature, int code, bool day, time_t observed);
 void badge_dashboard_set_time(time_t epoch);

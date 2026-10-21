@@ -1,19 +1,21 @@
 # AI Pet Badge · 爱莉希雅桌面陪伴原型
 
-基于微雪 ESP32-S3-Touch-LCD-1.85B 的课程项目。当前固件实现粉紫色圆屏、完整中文角色名、时间日期、深圳天气，以及坐姿待机和触摸动画；中文语音对话将在后续阶段接入。
+基于微雪 ESP32-S3-Touch-LCD-1.85B 的课程项目。当前固件实现粉紫色圆屏、完整中文角色名、时间日期、深圳天气、坐姿待机、触摸动画，以及 QMI8658 倾斜反馈、摇晃头晕和整屏连续转正；中文语音对话将在后续阶段接入。
 
 ## 硬件与显示
 
 - 360 × 360 圆屏，16 MiB Flash，8 MiB PSRAM。
 - 行走、跳跃、坐下三个动作，视频去绿幕后按站姿身高、脚底位置对齐，目标 24 FPS。
-- 固定背景、卡片和阴影预先合成，运行时更新角色与实时文字；当前完整界面实测约 22 FPS。
-- 素材暂存 Flash，逐帧 zlib 压缩，使用两个 PSRAM 显示缓冲及一个过渡缓冲；不依赖 TF 卡。
+- 背景、卡片和阴影预先合成，实时文字变化时更新界面缓存；使用 RGB565 旋转缓存、合并人物变换并交由 LVGL 显示，实现整屏连续转正。
+- v2 素材暂存 Flash，160×256 RGB565＋A8 逐帧 zlib 压缩，当前包约 5.94MB；PSRAM 保存场景双缓冲、界面缓存及人物过渡缓冲，不依赖 TF 卡。
 - 开机停留在坐下素材的最后一帧；待机时停止解码和刷新动画。
 - 点击按行走、跳跃、坐下依次选择互动：先起身，再执行一次动作，最后坐下静止。坐下互动为起身后再次坐下。
 - 起身复用坐下素材倒放；删去原视频开头、结尾的长停顿，相邻站姿用约 0.25 秒缓动混合衔接。
 - 动作途中点击不会截断当前动作；只保留最后一次待执行请求，坐下后再开始，避免连续点击积压。
+- 轻倾斜使人物小幅偏移、歪身，稳定后归位；明显来回摇晃优先进入坐姿头晕并取消当前和排队动作，3 秒后恢复，恢复与冷却期间抑制重复触发。
+- 人物、名字、时间、天气一起按重力连续转正；平放时保持最后可靠朝向。首次使用可通过 IMU CALIBRATE 保存默认正向。
 - 中文名字使用完整的四字字体子集，天气使用独立图标；字体来源与许可见 firmware/ai_pet_badge/licenses/fonts。
-- USB 诊断命令为 STATUS、NEXT、TONE、DASH、SHOT、TIME。TONE 只用于手动扬声器测试。
+- USB 诊断命令为 STATUS、NEXT、TONE、DASH、SHOT、TIME、IMU、IMU CALIBRATE、IMU SELFTEST、IMU BENCH。新增 IMU 交互静音，TONE 只用于手动扬声器测试，IMU BENCH 仅由 USB 显式启动 10 秒渲染压测。
 
 ## 时间与天气
 
@@ -35,7 +37,7 @@ py -3.11 -m venv .venv
 .\tools\Build-Badge.ps1 -AssetSource 'D:\AI Pet Badge\donz' -Flash -Port COM9
 ```
 
-素材目录中需要 walk.mp4、jump.mp4、sit.mp4；素材包已生成时可以省略 -AssetSource。COM9 是本次实机识别结果，其他机器请先确认端口。脚本按本次构建产生的 flash_args 烧录。
+素材目录中需要 walk.mp4、jump.mp4、sit.mp4；v2 素材包已生成时可以省略 -AssetSource。旧版素材包需要重新转换，固件会明确拒绝 v1。COM9 是本次实机识别结果，其他机器请先确认端口。脚本按本次构建产生的 flash_args 烧录。
 
 转换参数针对当前 donz 素材：sit.mp4 取 1.0–3.1 秒并以 1.4 倍速播放，站姿高 190 像素、脚底位于 y=310，为表盘和天气卡片留出空间。更换视频时调整 tools/prepare_badge_assets.py 的参数并检查 artifacts/assets/preview 中的 sequence-*.webp 和 aligned-poses.png，避免人物越界或姿势不匹配。
 
@@ -50,7 +52,7 @@ python tools\board_console.py --port COM9 --sync-time --seconds 3 --output artif
 .\.venv\Scripts\python.exe tools\capture_badge.py --port COM9 --output artifacts\screen.png
 ```
 
-STATUS 包含 stage、action、pending、completed 和 late_frames，可观察起身、动作、坐下的顺序及帧调度是否超时；frames 在坐姿待机时应保持不变。该计数反映提交给 LVGL 的帧，屏幕观感仍需实机确认。
+STATUS 包含 stage、action、pending、completed 和 late_frames，可观察动作顺序及帧调度是否超时，并包含 IMU 可用状态、朝向、平放、摇晃和头晕状态。设备静止、界面文字没有变化时，坐姿待机的 frames 应保持不变；该计数反映提交给 LVGL 的帧，屏幕观感仍需实机确认。体感阈值、校准、回放测试和实机验收见 [IMU_INTERACTION.md](docs/IMU_INTERACTION.md)。
 
 字体子集已包含在源码中。如修改界面文字，在已下载固定版本 LVGL 组件的工程中运行 npm install --prefix tools/fonts，再用 .venv 执行 tools/prepare_badge_fonts.py。请同步保留上游字体许可。
 
