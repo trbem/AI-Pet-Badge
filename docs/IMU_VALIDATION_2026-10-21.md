@@ -28,8 +28,10 @@
 ## 实板与稳定性检查
 
 - USB NEXT 行走、跳跃、坐下三种互动均已完成，completed=3，最终返回静止坐姿；待机 decode_us=0，帧计数仅随界面内容变化而更新。
-- 正向校准及重启恢复：等待用户将板子竖直放稳。
-- 左右 90°、倒置、平放再竖起、真实摇晃与误触发观感：等待用户手持验收。
+- 正向校准及重启恢复：通过。用户按期望正向竖直放稳后，采集约 1 秒，保存偏置 10.826°；主动重启后 IMU 返回 calibrated=true、available=true，读取错误为 0。原始记录为 artifacts/imu-calibration-supported-retry.log、imu-calibration-reboot.log。首次采样因姿态漂移略超 3°被拒绝，未覆盖旧值；再次放稳后成功。
+- 顺时针约 90°转向：用户确认文字反向补偿、保持正向，轴向映射正确。
+- 真实摇晃串口验证：重启后用户手持测试期间 shakes 累计为 3，记录到两次完整 dizzy_enter → dizzy → recover → idle；进入约 250ms，约 3 秒后开始恢复、约 400ms 后保持 sit/idle，pending 为空。IMU calibrated=true、errors=0；日志保留在 artifacts/imu-user-acceptance。此项来自实际传感器，未使用 IMU BENCH。
+- 另一侧 90°、倒置、平放再竖起、星星与动作抢占观感、正常拿放是否误触发：等待用户反馈。
 - 30 分钟连续运行：通过。实际 1800.047 秒，1698 次 STATUS、357 次 IMU、357 次仪表盘采样；重启/故障记录 0，IMU 错误 0，传感器离线采样 0。
 - 预热后首尾 30 次采样的空闲堆与 PSRAM 中位数均相差 -264 字节，未见明显持续增长；HTTP 天气请求期间的临时分配已回收。结束时约 6.54MB PSRAM 空闲，时间、RTC、深圳天气有效，姓名字库四字齐全。
 - 最终版本原始数据在 artifacts/imu-soak-release，包含 console.log、samples.json、summary.json。早期版本约 11 分钟运行记录不计入此次最终验收。
