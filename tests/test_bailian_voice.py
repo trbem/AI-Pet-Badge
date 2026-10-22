@@ -1,10 +1,12 @@
 """Offline tests: paid-request boundaries and credential handling, no real API calls."""
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import wave
 
 import httpx
@@ -18,6 +20,22 @@ class VoiceTests(unittest.TestCase):
         client = VoiceClient("sk-TEST-SECRET", "cn-beijing", transport=httpx.MockTransport(handler))
         self.addCleanup(client.close)
         return client
+
+    def test_plan_key_is_rejected_before_network_setup(self):
+        with self.assertRaises(VoiceError) as result:
+            VoiceClient("sk-sp-TEST-SECRET", "cn-beijing")
+        self.assertNotIn("sk-sp-TEST-SECRET", str(result.exception))
+        self.assertIn("未发送请求", str(result.exception))
+
+    def test_ipv6_loopback_host_cidr_does_not_break_client_setup(self):
+        with patch.dict(os.environ, {"NO_PROXY": "localhost,::1/128,127.0.0.1/32",
+                                     "HTTPS_PROXY": "http://127.0.0.1:7890"}, clear=True):
+            client = VoiceClient("sk-TEST-SECRET", "cn-beijing")
+            try:
+                self.assertEqual(os.environ["NO_PROXY"], "localhost,::1,127.0.0.1")
+                self.assertEqual(os.environ["HTTPS_PROXY"], "http://127.0.0.1:7890")
+            finally:
+                client.close()
 
     def test_auth_error_does_not_echo_secret_or_raw_response(self):
         def handler(request):

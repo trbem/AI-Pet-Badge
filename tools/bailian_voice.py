@@ -1,6 +1,7 @@
 """Check a local DashScope key, enroll a voice, and synthesize an audition."""
 import argparse
 import base64
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import re
 import sys
 import time
 from urllib.parse import urlsplit
+from urllib.request import getproxies
 import wave
 
 import httpx
@@ -22,10 +24,33 @@ class VoiceError(Exception):
     pass
 
 
+def normalize_proxy_bypass():
+    # HTTPX 0.28 treats IPv6 /128 bypass entries as invalid URLs. A /128
+    # network is exactly one host; normalize only these equivalent entries.
+    original = getproxies().get("no", "")
+    normalized = []
+    for entry in original.split(","):
+        entry = entry.strip()
+        if "/" in entry and "://" not in entry:
+            try:
+                network = ipaddress.ip_network(entry, strict=False)
+                if network.num_addresses == 1:
+                    entry = str(network.network_address)
+            except ValueError:
+                pass
+        normalized.append(entry)
+    updated = ",".join(normalized)
+    if updated != original:
+        # This process only; preserve actual proxy and certificate settings.
+        os.environ["NO_PROXY"] = updated
+
+
 class VoiceClient:
     def __init__(self, key, region, workspace="", transport=None):
         if not key or not key.strip():
             raise VoiceError("请先在 backend/.env 填写 DASHSCOPE_API_KEY；密钥不要发到聊天里。")
+        if key.strip().startswith("sk-sp-"):
+            raise VoiceError("当前 Key 符合 Coding Plan/Token Plan 套餐专用格式；请老师提供可调用 CosyVoice 的百炼通用 API Key。未发送请求。")
         if region not in ("cn-beijing", "ap-southeast-1"):
             raise VoiceError("地域应为 cn-beijing 或 ap-southeast-1，请向老师确认。")
         if workspace and not re.fullmatch(r"[A-Za-z0-9-]+", workspace):
@@ -36,7 +61,12 @@ class VoiceClient:
             host = "dashscope.aliyuncs.com" if region == "cn-beijing" else "dashscope-intl.aliyuncs.com"
         self.base = f"https://{host}/api/v1"
         self.key = key.strip()
-        self.http = httpx.Client(timeout=60, transport=transport, follow_redirects=False)
+        if transport is None:
+            normalize_proxy_bypass()
+        try:
+            self.http = httpx.Client(timeout=60, transport=transport, follow_redirects=False)
+        except (httpx.InvalidURL, ValueError):
+            raise VoiceError("本机代理配置格式不兼容，请检查代理及绕过列表；请求尚未发送。") from None
 
     def close(self):
         self.http.close()
