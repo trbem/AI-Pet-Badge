@@ -58,6 +58,8 @@ STATUS 包含 stage、action、pending、completed 和 late_frames，可观察�
 
 ## 目录
 
+音色复刻已准备本地 Key 检查、样本提交和 WAV 试听工具，操作见 [VOICE_CLONING.md](docs/VOICE_CLONING.md)。真实 API 鉴权及音色试听仍待本地配置和样本验证。
+
 - firmware/ai_pet_badge：自研应用与板级组件。
 - tools：素材转换、构建与 USB 诊断工具。
 - backend：语音后端环境准备，业务链路待接入。
