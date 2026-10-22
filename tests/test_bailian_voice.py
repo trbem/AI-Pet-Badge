@@ -27,6 +27,19 @@ class VoiceTests(unittest.TestCase):
         self.assertNotIn("sk-sp-TEST-SECRET", str(result.exception))
         self.assertIn("未发送请求", str(result.exception))
 
+    def test_token_plan_voice_query_uses_matching_endpoint(self):
+        requests = []
+        def handler(request):
+            requests.append(request)
+            return httpx.Response(200, json={"output": {"voice_list": []}})
+        client = VoiceClient("sk-sp-TEST-SECRET", "cn-beijing", service="token-plan",
+                             transport=httpx.MockTransport(handler))
+        self.addCleanup(client.close)
+        client.enroll("list_voice", page_index=0, page_size=10)
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0].url.host, "token-plan.cn-beijing.maas.aliyuncs.com")
+        self.assertEqual(requests[0].url.path, "/api/v1/services/audio/tts/customization")
+
     def test_ipv6_loopback_host_cidr_does_not_break_client_setup(self):
         with patch.dict(os.environ, {"NO_PROXY": "localhost,::1/128,127.0.0.1/32",
                                      "HTTPS_PROXY": "http://127.0.0.1:7890"}, clear=True):
@@ -44,6 +57,14 @@ class VoiceTests(unittest.TestCase):
             self.client(handler).enroll("list_voice")
         self.assertNotIn("sk-TEST-SECRET", str(result.exception))
         self.assertIn("401", str(result.exception))
+
+    def test_missing_enrollment_model_is_not_reported_as_invalid_key(self):
+        def handler(request):
+            return httpx.Response(404, json={"code": "InvalidParameter", "message": "Model not exist."})
+        with self.assertRaises(VoiceError) as result:
+            self.client(handler).enroll("list_voice")
+        self.assertIn("模型不存在", str(result.exception))
+        self.assertIn("不等于 Key 失效", str(result.exception))
 
     def test_api_redirect_does_not_forward_key(self):
         requests = []

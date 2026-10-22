@@ -46,16 +46,22 @@ def normalize_proxy_bypass():
 
 
 class VoiceClient:
-    def __init__(self, key, region, workspace="", transport=None):
+    def __init__(self, key, region, workspace="", transport=None, service="standard"):
         if not key or not key.strip():
             raise VoiceError("请先在 backend/.env 填写 DASHSCOPE_API_KEY；密钥不要发到聊天里。")
-        if key.strip().startswith("sk-sp-"):
-            raise VoiceError("当前 Key 符合 Coding Plan/Token Plan 套餐专用格式；请老师提供可调用 CosyVoice 的百炼通用 API Key。未发送请求。")
+        if service not in ("standard", "token-plan"):
+            raise VoiceError("DASHSCOPE_SERVICE 应为 standard 或 token-plan。")
+        if service == "standard" and key.strip().startswith("sk-sp-"):
+            raise VoiceError("套餐 Key 需要匹配套餐入口，不能直接用于通用接口；若已确认是 Token Plan，可指定 --service token-plan。未发送请求。")
         if region not in ("cn-beijing", "ap-southeast-1"):
             raise VoiceError("地域应为 cn-beijing 或 ap-southeast-1，请向老师确认。")
         if workspace and not re.fullmatch(r"[A-Za-z0-9-]+", workspace):
             raise VoiceError("DASHSCOPE_WORKSPACE_ID 格式不正确。")
-        if workspace:
+        if service == "token-plan":
+            if region != "cn-beijing" or workspace:
+                raise VoiceError("Token Plan 使用北京套餐专属域名，请勿混入其他地域或业务空间 ID。")
+            host = "token-plan.cn-beijing.maas.aliyuncs.com"
+        elif workspace:
             host = f"{workspace}.{region}.maas.aliyuncs.com"
         else:
             host = "dashscope.aliyuncs.com" if region == "cn-beijing" else "dashscope-intl.aliyuncs.com"
@@ -94,6 +100,8 @@ class VoiceClient:
                 403: "请老师检查业务空间权限、模型授权及服务开通状态。",
                 429: "触发限流或额度限制，请稍后检查。",
             }.get(response.status_code, "请老师结合地域、模型权限及账户状态检查。")
+            if response.status_code == 404 and "model not exist" in str(data.get("message", "")).lower():
+                hint = "当前入口返回模型不存在，请确认音色注册模型的支持范围；这不等于 Key 失效。"
             raise VoiceError(f"调用失败：HTTP {response.status_code}，code={code}。{hint}")
         output = data.get("output")
         if not isinstance(output, dict):
@@ -158,16 +166,19 @@ def audio_data(path):
     return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode("ascii")
 
 
-def save_voice(voice_id, model, region):
+def save_voice(voice_id, model, region, service="standard"):
     # Keep future commands on the same model/region, including --region overrides.
     set_key(ENV_FILE, "TTS_VOICE_ID", voice_id)
     set_key(ENV_FILE, "TTS_MODEL", model)
     set_key(ENV_FILE, "DASHSCOPE_REGION", region)
+    set_key(ENV_FILE, "DASHSCOPE_SERVICE", service)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--region", choices=("cn-beijing", "ap-southeast-1"))
+    parser.add_argument("--service", choices=("standard", "token-plan"),
+                        help="通用接口或 Token Plan；套餐模式用于 Agent 内素材验证")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check", help="仅查询音色列表，不创建音色或合成语音")
     listing = commands.add_parser("list", help="按前缀查询已创建的音色，恢复创建记录")
@@ -183,13 +194,14 @@ def main():
     args = parser.parse_args()
     load_dotenv(ENV_FILE, override=False)
     region = args.region or os.getenv("DASHSCOPE_REGION", "cn-beijing")
+    service = args.service or os.getenv("DASHSCOPE_SERVICE", "standard")
     model = os.getenv("TTS_MODEL", "cosyvoice-v3.5-flash").strip()
     if not model.startswith("cosyvoice-") or not re.fullmatch(r"[A-Za-z0-9_.-]+", model):
         raise VoiceError("此工具用于 CosyVoice，请检查 TTS_MODEL。")
     client = VoiceClient(os.getenv("DASHSCOPE_API_KEY", ""), region,
-                         os.getenv("DASHSCOPE_WORKSPACE_ID", "").strip())
+                         os.getenv("DASHSCOPE_WORKSPACE_ID", "").strip(), service=service)
     try:
-        print(f"地域：{region}；目标模型：{model}")
+        print(f"接口：{service}；地域：{region}；目标模型：{model}")
         if args.command == "check":
             info = client.enroll("list_voice", page_index=0, page_size=10)
             if not isinstance(info.get("voice_list"), list):
@@ -217,18 +229,18 @@ def main():
             record = ROOT / "artifacts" / "voice" / f"created-{time.time_ns()}.json"
             record.parent.mkdir(parents=True, exist_ok=True)
             record.write_text(json.dumps({"voice_id": voice_id, "target_model": model, "region": region,
-                                          "endpoint": client.base}, ensure_ascii=False, indent=2), encoding="utf-8")
+                                          "service": service, "endpoint": client.base}, ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"已创建音色：{voice_id}；创建记录：{record}")
             print("如果后续查询失败，使用该 ID 运行 status；不要重复运行 clone。")
             client.ready(voice_id, model, wait=True)
-            save_voice(voice_id, model, region)
+            save_voice(voice_id, model, region, service)
             print("音色已就绪，音色 ID、模型和地域已写入本地 backend/.env。")
         elif args.command == "status":
             voice_id = args.voice_id or os.getenv("TTS_VOICE_ID", "").strip()
             if not voice_id:
                 raise VoiceError("请用 --voice-id 指定创建记录中的音色 ID。")
             client.ready(voice_id, model)
-            save_voice(voice_id, model, region)
+            save_voice(voice_id, model, region, service)
             print("音色已就绪，音色 ID、模型和地域已保存。")
         else:
             voice_id = os.getenv("TTS_VOICE_ID", "").strip()
