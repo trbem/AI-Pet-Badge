@@ -119,6 +119,30 @@ class VoiceTests(unittest.TestCase):
         self.assertEqual(len(requests), 4)
         self.assertTrue(all("Authorization" not in r.headers for r in requests[2:]))
 
+    def test_qwen_system_voice_uses_https_and_finalizes_streamed_wav(self):
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as audio:
+            audio.setparams((1, 2, 24000, 0, "NONE", "not compressed"))
+            audio.writeframes(b"\0\0" * 2400)
+        data = bytearray(buf.getvalue())
+        data[4:8] = (0x7fffffff).to_bytes(4, "little")
+        data[40:44] = (0x7fffffff).to_bytes(4, "little")
+        requests = []
+        def handler(request):
+            requests.append(request)
+            if request.method == "POST":
+                return httpx.Response(200, json={"output": {"audio": {
+                    "data": "", "url": "http://example.oss-cn-beijing.aliyuncs.com/audio.wav?signature=test"}}})
+            return httpx.Response(200, content=bytes(data))
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "qwen.wav"
+            self.client(handler).synthesize("longanhuan_v3.6", "qwen-audio-3.0-tts-plus", "hello", output)
+            with wave.open(str(output), "rb") as audio:
+                self.assertEqual(audio.getnframes(), 2400)
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(requests[1].url.scheme, "https")
+        self.assertNotIn("Authorization", requests[1].headers)
+
     def test_existing_preview_stops_before_cloud_request(self):
         requests = []
         def handler(request):

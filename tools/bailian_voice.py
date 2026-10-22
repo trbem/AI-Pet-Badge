@@ -2,13 +2,14 @@
 import argparse
 import base64
 import ipaddress
+import io
 import json
 import os
 from pathlib import Path
 import re
 import sys
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import getproxies
 import wave
 
@@ -129,10 +130,21 @@ class VoiceClient:
         if output.exists():
             raise VoiceError("输出文件已存在，请指定新的 --output，避免重复合成。")
         self.ready(voice_id, model)
+        self.synthesize(voice_id, model, text, output)
+
+    def synthesize(self, voice_id, model, text, output):
+        if output.exists():
+            raise VoiceError("输出文件已存在，请指定新的 --output，避免重复合成。")
         result = self.call("/services/audio/tts/SpeechSynthesizer", {
             "model": model, "input": {"voice": voice_id, "text": text, "format": "wav", "sample_rate": 24000},
         })
         url = result.get("audio", {}).get("url")
+        if isinstance(url, str):
+            parts = urlsplit(url)
+            # The API can return signed OSS URLs using http. Upgrade the scheme
+            # for the same Alibaba host/path/query instead of downloading in cleartext.
+            if parts.scheme == "http" and parts.hostname and parts.hostname.endswith(".aliyuncs.com"):
+                url = urlunsplit(parts._replace(scheme="https"))
         if not isinstance(url, str) or urlsplit(url).scheme != "https" or not urlsplit(url).hostname:
             raise VoiceError("合成未返回有效的 HTTPS 音频下载地址。")
         try:
@@ -143,9 +155,19 @@ class VoiceClient:
             raise VoiceError("合成已提交，但下载失败；请检查网络。") from None
         if not audio.content.startswith(b"RIFF") or audio.content[8:12] != b"WAVE":
             raise VoiceError("下载内容不是 WAV，未写入试听文件。")
+        try:
+            with wave.open(io.BytesIO(audio.content), "rb") as source:
+                params = source.getparams()
+                pcm = source.readframes(source.getnframes())
+            if not pcm or params.nchannels not in (1, 2) or params.sampwidth != 2:
+                raise VoiceError("下载的 WAV 缺少有效的 16-bit PCM 数据。")
+        except (wave.Error, EOFError):
+            raise VoiceError("下载的 WAV 结构异常，未写入试听文件。") from None
         output.parent.mkdir(parents=True, exist_ok=True)
-        with output.open("xb") as target:
-            target.write(audio.content)
+        # Finalize streaming WAV size placeholders so duration is correct in players.
+        with output.open("xb") as target, wave.open(target, "wb") as writer:
+            writer.setparams(params)
+            writer.writeframes(pcm)
 
 
 def audio_data(path):
@@ -179,6 +201,7 @@ def main():
     parser.add_argument("--region", choices=("cn-beijing", "ap-southeast-1"))
     parser.add_argument("--service", choices=("standard", "token-plan"),
                         help="通用接口或 Token Plan；套餐模式用于 Agent 内素材验证")
+    parser.add_argument("--model", help="覆盖本次目标模型，不改变本地 Key")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check", help="仅查询音色列表，不创建音色或合成语音")
     listing = commands.add_parser("list", help="按前缀查询已创建的音色，恢复创建记录")
@@ -191,13 +214,19 @@ def main():
     speak = commands.add_parser("speak", help="用配置中的音色合成一段 WAV 试听")
     speak.add_argument("--text", required=True)
     speak.add_argument("--output", type=Path, default=ROOT / "artifacts" / "voice" / "preview.wav")
+    system = commands.add_parser("system-test", help="用系统音色测试语音合成，不创建复刻音色")
+    system.add_argument("--voice", help="系统音色；千问 3.0 Plus 默认 longanhuan_v3.6")
+    system.add_argument("--text", default="你好，今天也要开开心心的。")
+    system.add_argument("--output", type=Path, default=ROOT / "artifacts" / "voice" / "system-preview.wav")
     args = parser.parse_args()
     load_dotenv(ENV_FILE, override=False)
     region = args.region or os.getenv("DASHSCOPE_REGION", "cn-beijing")
     service = args.service or os.getenv("DASHSCOPE_SERVICE", "standard")
-    model = os.getenv("TTS_MODEL", "cosyvoice-v3.5-flash").strip()
-    if not model.startswith("cosyvoice-") or not re.fullmatch(r"[A-Za-z0-9_.-]+", model):
-        raise VoiceError("此工具用于 CosyVoice，请检查 TTS_MODEL。")
+    model = (args.model or os.getenv("TTS_MODEL", "cosyvoice-v3.5-flash")).strip()
+    if not (model.startswith("cosyvoice-") or model.startswith("qwen-audio-")) or not re.fullmatch(r"[A-Za-z0-9_.-]+", model):
+        raise VoiceError("此工具用于 CosyVoice/Qwen-Audio-TTS，请检查 TTS_MODEL。")
+    if model.startswith("qwen-audio-") and "-tts-" not in model:
+        raise VoiceError("请选择 Qwen-Audio-TTS 模型，不要使用 ASR 或实时对话模型。")
     client = VoiceClient(os.getenv("DASHSCOPE_API_KEY", ""), region,
                          os.getenv("DASHSCOPE_WORKSPACE_ID", "").strip(), service=service)
     try:
@@ -242,6 +271,15 @@ def main():
             client.ready(voice_id, model)
             save_voice(voice_id, model, region, service)
             print("音色已就绪，音色 ID、模型和地域已保存。")
+        elif args.command == "system-test":
+            if not args.text.strip() or len(args.text) > 500:
+                raise VoiceError("试听文字需要 1～500 个字符。")
+            voice = args.voice or {"qwen-audio-3.0-tts-plus": "longanhuan_v3.6",
+                                   "cosyvoice-v3-flash": "longanyang"}.get(model)
+            if not voice:
+                raise VoiceError("此模型没有配置默认系统音色，请用 --voice 指定该模型支持的系统音色。")
+            client.synthesize(voice, model, args.text, args.output)
+            print(f"系统音色试听已保存：{args.output.resolve()}；本次没有创建复刻音色。")
         else:
             voice_id = os.getenv("TTS_VOICE_ID", "").strip()
             if not voice_id:

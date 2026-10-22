@@ -50,4 +50,6 @@
 - 用户起初仅收到老师提供的 API Key，随后补充北京 Token Plan 文本接入地址；先核对对应端点与能力，再决定接入方案，不将 Key 文本或通用端点的一次失败作为套餐能力的证明。
 - 已准备 tools/bailian_voice.py：列表检查、项目音色查询、本地样本复刻、状态查询与 WAV 试听；音色 ID、模型和地域在就绪后保存到本地配置。操作见 VOICE_CLONING.md。
 - 本地已填写老师提供的 Key；北京、新加坡通用音色列表返回 401 InvalidApiKey。匹配 Token Plan 域名后，尝试 voice-enrollment/list_voice 返回 404 InvalidParameter、Model not exist，不能据此断言 Key 失效或整个套餐不支持语音。Token Plan 文档有独立语音合成能力，音色注册接口与支持范围仍需确认；声音样本、成功创建音色、试听和板端语音仍待完成。
-- 已修复 HTTPX 与本机 IPv6 单主机 CIDR 代理绕过项的兼容问题，区分 standard 和 token-plan 路由，仅在通用端点模式阻止套餐 Key 混用；离线请求与密钥保护测试 11 项通过。套餐模式用于 Agent 交互素材验证，正式勋章后端另按适用的通用 API 方案接入。密钥未回显或提交仓库。
+- 使用同一 Key 实际查询 Token Plan 模型列表返回 200，qwen-audio-3.0-tts-plus 系统音色合成与下载通过。已更新本地服务、地域和目标模型，Key 保持不变；当前可用的短句试听为 artifacts/voice/qwen-system-preview.wav，不能视作角色复刻结果。
+- 用户提供 sy 目录 7 段 MP3，已从前两段整理出 17.45 秒的 24kHz 单声道 16-bit PCM 参考音频；音色注册仍未获得 ID，当前套餐的注册接口支持是后续阻塞点，不再要求用户重复提供已有 Key 或样本。
+- 已修复代理兼容、套餐路由、阿里云音频 URL 的 HTTPS 下载与流式 WAV 时长；离线请求与密钥保护测试 12 项通过。套餐模式用于 Agent 交互素材验证，正式勋章后端另按适用的通用 API 方案接入。密钥未回显或提交仓库。
