@@ -132,6 +132,13 @@ class VoiceClient:
         self.ready(voice_id, model)
         self.synthesize(voice_id, model, text, output)
 
+    def speak_existing(self, voice_id, model, text, output):
+        # Token Plan may expose synthesis without voice-enrollment. A supplied
+        # existing ID must identify this model; the cloud still checks ownership.
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,256}", voice_id) or not voice_id.startswith(model + "-"):
+            raise VoiceError("已有音色 ID 应属于当前 TTS_MODEL；请提供该模型创建的完整 ID。")
+        self.synthesize(voice_id, model, text, output)
+
     def synthesize(self, voice_id, model, text, output):
         if output.exists():
             raise VoiceError("输出文件已存在，请指定新的 --output，避免重复合成。")
@@ -213,6 +220,7 @@ def main():
     status.add_argument("--voice-id")
     speak = commands.add_parser("speak", help="用配置中的音色合成一段 WAV 试听")
     speak.add_argument("--text", required=True)
+    speak.add_argument("--voice-id", help="同账号已创建的音色 ID；Token Plan 由合成接口验证，不查询注册接口")
     speak.add_argument("--output", type=Path, default=ROOT / "artifacts" / "voice" / "preview.wav")
     system = commands.add_parser("system-test", help="用系统音色测试语音合成，不创建复刻音色")
     system.add_argument("--voice", help="系统音色；千问 3.0 Plus 默认 longanhuan_v3.6")
@@ -281,12 +289,18 @@ def main():
             client.synthesize(voice, model, args.text, args.output)
             print(f"系统音色试听已保存：{args.output.resolve()}；本次没有创建复刻音色。")
         else:
-            voice_id = os.getenv("TTS_VOICE_ID", "").strip()
+            voice_id = (args.voice_id or os.getenv("TTS_VOICE_ID", "")).strip()
             if not voice_id:
                 raise VoiceError("请先创建音色，或在 backend/.env 填写 TTS_VOICE_ID。")
             if not args.text.strip() or len(args.text) > 500:
                 raise VoiceError("试听文字需要 1～500 个字符。")
-            client.speak(voice_id, model, args.text, args.output)
+            if service == "token-plan":
+                client.speak_existing(voice_id, model, args.text, args.output)
+            else:
+                client.speak(voice_id, model, args.text, args.output)
+            if args.voice_id:
+                # Persist only after the cloud accepted this voice and audio downloaded.
+                save_voice(voice_id, model, region, service)
             print(f"试听已保存：{args.output.resolve()}")
     finally:
         client.close()

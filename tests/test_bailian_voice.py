@@ -96,6 +96,39 @@ class VoiceTests(unittest.TestCase):
         self.assertEqual(len(requests), 1)
         self.assertEqual(json.loads(requests[0].content)["input"]["action"], "query_voice")
 
+    def test_external_voice_for_other_model_stops_before_any_request(self):
+        requests = []
+        def handler(request):
+            requests.append(request)
+            raise AssertionError("No request expected")
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(VoiceError):
+                self.client(handler).speak_existing("cosyvoice-v2-elysia-test", "qwen-audio-3.0-tts-plus",
+                                                   "hello", Path(folder) / "preview.wav")
+        self.assertEqual(requests, [])
+
+    def test_existing_token_plan_voice_calls_synthesis_without_registration(self):
+        requests = []
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as audio:
+            audio.setparams((1, 2, 24000, 0, "NONE", "not compressed"))
+            audio.writeframes(b"\0\0" * 240)
+        def handler(request):
+            requests.append(request)
+            if request.method == "POST":
+                self.assertTrue(request.url.path.endswith("SpeechSynthesizer"))
+                self.assertEqual(json.loads(request.content)["input"]["voice"], "qwen-audio-3.0-tts-plus-elysia-test")
+                return httpx.Response(200, json={"output": {"audio": {"url": "https://audio.example/preview.wav"}}})
+            return httpx.Response(200, content=buf.getvalue())
+        client = VoiceClient("sk-sp-TEST-SECRET", "cn-beijing", service="token-plan",
+                             transport=httpx.MockTransport(handler))
+        self.addCleanup(client.close)
+        with tempfile.TemporaryDirectory() as folder:
+            client.speak_existing("qwen-audio-3.0-tts-plus-elysia-test", "qwen-audio-3.0-tts-plus",
+                                  "hello", Path(folder) / "preview.wav")
+        self.assertEqual(len(requests), 2)
+        self.assertNotIn("Authorization", requests[1].headers)
+
     def test_synthesis_download_and_redirect_do_not_carry_api_key(self):
         requests = []
         buf = io.BytesIO()

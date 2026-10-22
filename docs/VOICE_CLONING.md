@@ -85,7 +85,15 @@ clone 会向云端创建音色，不自动重试。创建成功立即将音色 I
 .\.venv\Scripts\python.exe tools\bailian_voice.py speak --text '你好呀，今天也要开开心心的。'
 ```
 
-工具先验证音色绑定模型和就绪状态，再提交一次合成，下载为 artifacts/voice/preview.wav。合成按服务计费，工具不自动反复试听；如输出已存在，使用新的 --output 文件名。下载音频不携带 API Key。试听确认后再集成板端语音链路，不改变当前已验收的动画固件。
+通用接口模式先查询音色绑定模型和就绪状态；Token Plan 模式使用已有音色 ID 直接提交合成，由合成接口验证音色资源和权限，不向当前不可用的注册接口查询。两者均下载为 artifacts/voice/preview.wav。合成按服务计费，工具不自动反复试听；如输出已存在，使用新的 --output 文件名。下载音频不携带 API Key。试听确认后再集成板端语音链路，不改变当前已验收的动画固件。
+
+若同账号管理者已创建 qwen-audio-3.0-tts-plus 音色，可以只提供完整 voice_id，无需向用户提供另一个 Key。现有 Key 能否使用该音色仍需实测；工具支持如下入口，模型前缀不匹配时在本地拒绝，仅在合成与下载成功后保存新 ID，不会自动回退到系统音色：
+
+```powershell
+.\.venv\Scripts\python.exe tools\bailian_voice.py speak --voice-id '同账号创建的完整音色ID' --text '你好呀，今天也要开开心心的。' --output artifacts\voice\elysia-cloud-preview.wav
+```
+
+当前没有这样的音色 ID，以上为准备好的验证入口。完整排查与可转交管理者的问题见 [VOICE_CLOUD_STATUS_2026-10-22.md](VOICE_CLOUD_STATUS_2026-10-22.md)。
 
 ## 当前验证范围
 
@@ -94,6 +102,7 @@ clone 会向云端创建音色，不自动重试。创建成功立即将音色 I
 - Token Plan /compatible-mode/v1/models 返回 200，共 27 个模型；语音相关项包含 qwen-audio-3.0-tts-plus 与 qwen-audio-3.0-realtime-plus。
 - qwen-audio-3.0-tts-plus 合成与音频下载均返回 200，系统音色试听成功；CosyVoice-v3-flash 在当前入口返回模型不存在。因此使用现有 Key 和匹配的千问模型继续验证，无须据前缀直接要求换 Key。
 - voice-enrollment/list_voice 和另一套 qwen-voice-enrollment/list 查询均返回 404、Model not exist。将注册路径的 model 改成已列出的千问 TTS 模型只是诊断尝试；其列表查询、Base64 audio、旧 url Data URI 及官方公网示例音频 URL 均返回 400、url error。未返回音色 ID；不将这些诊断尝试记为复刻成功，不把替换 model 的方式固化为正式注册流程。Token Plan 域名上的临时上传凭证路径也返回 404。
+- 用户选择只继续云端排查，未安装本地模型。进一步对照官方 SDK 和完整复刻示例，再实际提交 voice-enrollment/create_voice，明确指定 qwen-audio-3.0-tts-plus 与现有样本，仍返回 404、Model not exist。完整创建与列表查询分开验证，尚未得到角色音色 ID。
 - 普通语音可用与注册失败分别记录。北京、新加坡通用接口上的 401 不证明该 Token Plan Key 失效。后续复刻仍需要当前套餐可访问的音色注册接口或平台端支持；当前没有可用的角色音色 ID。
 - 7 个样本均可本地解码，每段约 7.7～9.6 秒。选取 1.0.mp3 和 1.1.mp3 合成 artifacts/voice/elysia-reference.wav，17.45 秒、24kHz、单声道、16-bit PCM；原始素材保留。音色相似度与实际复刻质量尚未验证。
 - 完整密钥未回显或提交仓库。参考音频已按用户的复刻目标提交官方注册接口进行格式校验，但未获得可用音色 ID；原始样本、试听、参考音频与接口诊断均未提交仓库，本地文件保留在被忽略的 sy 和 artifacts 中。本地 Key 不变，仅更新已验证的服务、地域与目标模型配置。
@@ -104,6 +113,6 @@ clone 会向云端创建音色，不自动重试。创建成功立即将音色 I
 .\.venv\Scripts\python.exe tools\prepare_voice_reference.py sy\1.0.mp3 sy\1.1.mp3 --output artifacts\voice\elysia-reference.wav
 ```
 
-12 项离线测试通过，新增覆盖千问系统音色不查询注册模型、阿里云 HTTP 音频地址改用 HTTPS，以及流式 WAV 时长修正。其余覆盖错误不回显密钥、重定向不转发密钥、创建超时不重复提交、绑定模型检查、已有试听文件时阻止合成、本地 WAV 编码、IPv6 代理兼容、套餐入口匹配，以及模型不存在时不误报 Key 失效。真实生成的 WAV 已校验数据长度与时长；实际音色创建仍未完成。
+14 项离线测试通过，新增已有音色 ID 在 Token Plan 下不查询注册接口，以及错误模型的外部音色 ID 在发送前被拒绝。既有检查覆盖千问系统音色、HTTPS 下载、流式 WAV 时长、密钥保护、创建不重复提交与模型绑定等。真实生成的 WAV 已校验数据长度与时长；实际角色音色创建及已有角色音色的 Token Plan 合成仍未完成。
 
 官方参考：[API Key 配置](https://help.aliyun.com/zh/model-studio/get-api-key)、[音色复刻指南](https://help.aliyun.com/zh/model-studio/voice-cloning-user-guide)、[音色复刻 HTTP API](https://help.aliyun.com/zh/model-studio/voice-clone-design-http-api)、[HTTP 语音合成](https://help.aliyun.com/zh/model-studio/non-realtime-tts-user-guide)。
