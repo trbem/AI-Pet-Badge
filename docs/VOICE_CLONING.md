@@ -97,6 +97,8 @@ clone 会向云端创建音色，不自动重试。创建成功立即将音色 I
 
 ## 当前验证范围
 
+2026-10-23 复核：现有 Key 的模型列表返回 200、29 个模型，语音相关新增 qwen-audio-3.0-asr-flash；voice-enrollment 列表查询仍返回 404、Model not exist。新增 multipart 文件直传示例实测返回 400、Model not exist，未创建音色；该示例使用另一套 Qwen3-TTS 模型，未替换正式工具的 JSON 注册流程。直接参考音频合成的 NLS 方案需要另一套项目 Appkey 与 NLS Token，现有 Token Plan Key 不能代替。当前仍无角色音色 ID，等待账号侧确认注册入口或提供同账号创建的对应模型音色 ID，详见上面的排查报告。
+
 2026-10-22：用户提供现有 Key、北京 Token Plan 地址，以及本地 sy 目录中的 7 段 MP3。实测如下：
 
 - Token Plan /compatible-mode/v1/models 返回 200，共 27 个模型；语音相关项包含 qwen-audio-3.0-tts-plus 与 qwen-audio-3.0-realtime-plus。

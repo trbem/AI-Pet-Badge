@@ -1,5 +1,7 @@
 # 云端音色注册排查 · 2026-10-22
 
+最近复核：2026-10-23。文件名保留，避免既有链接失效。
+
 ## 当前约束与结论
 
 继续使用老师提供的现有 Token Plan API Key，只走云端。用户已选择不切换本地模型；没有安装本地推理环境或下载模型。
@@ -20,6 +22,24 @@
 对照阿里云官方 Python SDK 与示例：音色注册使用 voice-enrollment，目标语音模型放在 input.target_model；不是把注册请求的 model 改成 TTS 模型。官方示例与当前请求的核心字段一致。Token Plan 文档给出了语音合成接口，但没有据此确认当前凭证可以调用音色注册服务。
 
 因此，目前可以定位到当前 Token Plan 接入下音色注册模型不可访问；是套餐支持范围、路由配置还是账号权限问题，需要平台或账号管理者确认。不能仅据 404 保证“开通某个权限”一定能解决，也不能据此前缀或错误认定整个 Key 无效。
+
+## 2026-10-23 补充实测
+
+本轮没有重复发送先前失败的 JSON 创建请求。新增验证文件直传示例，并复核模型列表与注册查询：
+
+| 操作 | 实际结果 |
+| --- | --- |
+| 当前 Key 的模型列表 | HTTP 200，29 个模型；语音模型新增 qwen-audio-3.0-asr-flash，原有 TTS Plus 与 Realtime Plus 仍在 |
+| 官方 JSON 格式 voice-enrollment/list_voice | HTTP 404，InvalidParameter，Model not exist |
+| QianWen-AI 示例中的 multipart 文件直传创建 | HTTP 400，InvalidParameter，Model not exist；未返回 output 或音色 ID |
+
+文件直传严格沿用该示例的 qwen-voice-enrollment/create、qwen3-tts-vc-2026-01-22 和 preferred_name，上传现有 1.0.mp3；仅将域名切为现有凭证对应的 Token Plan 原生入口，不重试、不跟随重定向。该示例属于另一套 Qwen3-TTS 模型，其目标模型并未列在当前 Key 的模型列表中；这项对照失败不能用来替代 Qwen-Audio 正式注册请求的验证，也不能把该参数组推广到当前模型。正式工具继续使用官方 HTTP 文档要求的 voice-enrollment 与 JSON 格式。
+
+另外核查了不先注册、直接带参考音频合成的路线。当前百炼 Qwen-Audio-TTS HTTP 文档要求 voice，复刻音色由注册接口创建；Realtime 文档同样要求先创建对应目标模型的音色 ID。阿里云智能语音交互另有 prompt_wav_url 直接合成接口，但属于 NLS 产品，需要项目 Appkey 和 NLS Token，不能把现有 Token Plan API Key 当作这两项凭证。没有找到仅凭现有 Key 可验证的替代复刻入口，没有将系统音色试听冒充复刻结果。
+
+诊断响应、请求编号、采样时间及公开参考资料快照保存在被忽略的 artifacts/voice 中；不含密钥的账号管理员排查说明另存本地，便于转交。最新模型列表只能确认相应模型的可见性，不能证明音色注册可用。
+
+补充来源：[文件直传参考示例](https://github.com/QianWen-AI/qianwen-ai/blob/main/skills/audio/qianwen-audio-tts/references/api-guide.md)、[百炼 TTS HTTP 参数](https://help.aliyun.com/zh/model-studio/qwen-audio-tts-http-api)、[实时对话音色配置](https://help.aliyun.com/zh/model-studio/qwen-audio-realtime-user-guides)、[NLS 参考音频合成及凭证要求](https://help.aliyun.com/zh/isi/user-guide/http-cosyvoice-api)。
 
 ## 参考样本
 
