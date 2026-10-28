@@ -19,6 +19,8 @@ artifacts/
 *.m4a
 *.flac
 **/animations.badge
+**/qinglan.badge
+**/qinglan.json
 **/animations.json
 firmware/01_comprehensive_example/
 firmware/02_lvgl_demo/

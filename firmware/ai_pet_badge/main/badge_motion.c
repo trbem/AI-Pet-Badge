@@ -50,14 +50,22 @@ void badge_motion_tick(badge_motion_t *m, int64_t now, uint32_t request, bool sh
     if (m->stage == MOTION_IDLE) {
         if (m->pending != BADGE_NO_ACTION) {
             m->active = m->pending; m->pending = BADGE_NO_ACTION;
-            m->clip = m->sit; m->frame = m->count[m->sit]-2;
-            enter(m,MOTION_STAND_UP,now);
+            if (m->standing_idle) {
+                m->clip = m->active; m->frame = 0;
+                enter(m,MOTION_BLEND_ACTION,now);
+            } else {
+                m->clip = m->sit; m->frame = m->count[m->sit]-2;
+                enter(m,MOTION_STAND_UP,now);
+            }
         }
         return;
     }
     if (badge_motion_blending(m)) {
         if (now-m->stage_us < 250000) return;
         if (m->stage == MOTION_BLEND_ACTION) { m->frame = 1; enter(m,MOTION_ACTION,now); }
+        else if (m->standing_idle) {
+            m->frame = m->count[m->sit]-1; ++m->completed; enter(m,MOTION_IDLE,now);
+        }
         else { m->frame = 1; enter(m,MOTION_SIT_DOWN,now); }
         return;
     }
@@ -76,7 +84,8 @@ void badge_motion_tick(badge_motion_t *m, int64_t now, uint32_t request, bool sh
         break;
     case MOTION_ACTION:
         if (++m->frame >= m->count[m->clip]) {
-            m->clip = m->sit; m->frame = 0; enter(m,MOTION_BLEND_SIT,now);
+            m->clip = m->sit; m->frame = m->standing_idle?m->count[m->sit]-1:0;
+            enter(m,MOTION_BLEND_SIT,now);
         }
         break;
     case MOTION_SIT_DOWN:

@@ -12,6 +12,7 @@ typedef struct {
     badge_motion_stage_t stage;
     uint32_t sit, count[3], fps, clip, frame, active, pending, completed, blend_epoch;
     int64_t next_us, stage_us, dizzy_us;
+    bool standing_idle;
 } badge_motion_t;
 extern const char *const badge_motion_names[];
 void badge_motion_init(badge_motion_t *m, uint32_t sit, const uint32_t counts[3], uint32_t fps);

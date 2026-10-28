@@ -5,6 +5,7 @@
 #include <stdatomic.h>
 #include <sys/time.h>
 #include "badge_dashboard.h"
+#include "badge_character.h"
 #include "bsp/esp-bsp.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_log.h"
@@ -133,7 +134,7 @@ void badge_dashboard_create(lv_obj_t *screen)
     lv_obj_set_pos(date_label, 203, 28);
     day_label = label(screen, &badge_ui_14, 0xAE9ABA, "");
     lv_obj_set_pos(day_label, 203, 47);
-    name_label = label(screen, &badge_name_20, 0x8A648D, "爱莉希雅");
+    name_label = label(screen, &badge_name_20, 0x8A648D, BADGE_CHARACTER_NAME);
     lv_obj_set_width(name_label, 132);
     lv_obj_set_style_text_align(name_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(name_label, LV_ALIGN_TOP_MID, 0, 65);
@@ -229,8 +230,8 @@ void badge_dashboard_status(void)
     time_t observed = state.observed;
     portEXIT_CRITICAL(&state_mux);
     unsigned glyphs = 0;
-    const uint32_t characters[] = {0x7231, 0x8389, 0x5E0C, 0x96C5};
-    for (unsigned i = 0; i < 4; ++i) {
+    const uint32_t characters[] = {BADGE_CHARACTER_GLYPHS};
+    for (unsigned i = 0; i < sizeof(characters)/sizeof(characters[0]); ++i) {
         lv_font_glyph_dsc_t descriptor;
         if (lv_font_get_glyph_dsc(&badge_name_20, &descriptor, characters[i], 0)) ++glyphs;
     }

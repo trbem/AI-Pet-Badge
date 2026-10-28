@@ -10,7 +10,7 @@ symbols = '爱莉希雅深圳天气晴多云阴雾小中大暴雨雪雷阵冻毛
 symbols += '头晕恢复'
 fonts = [
     ('badge_ui_14', 'SourceHanSansSC-Normal.otf', 14, symbols, '0x20-0x7e'),
-    ('badge_name_20', 'SourceHanSansSC-Normal.otf', 20, '爱莉希雅', None),
+    ('badge_name_20', 'SourceHanSansSC-Normal.otf', 20, '爱莉希雅青岚', None),
     ('badge_clock_30', 'Montserrat-Medium.ttf', 30, '0123456789:-', None),
     ('badge_icons_26', 'FontAwesome5-Solid+Brands+Regular.woff', 26, None,
      '0xf185,0xf186,0xf0c2,0xf0e9,0xf2dc,0xf0e7'),

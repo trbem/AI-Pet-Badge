@@ -1,14 +1,17 @@
 /* Deterministic replay. Uses local state only; never injects movement into the live UI. */
-#include "badge_imu_filter.h"
 #include "badge_motion.h"
-#include <math.h>
 #include <stdio.h>
+#ifndef BADGE_HOST_MOTION_SELFTEST
+#include "badge_imu_filter.h"
+#include <math.h>
+#endif
 
 #define CHECK(condition, name) do { \
     if (!(condition)) { ++failures; printf("BADGE_TEST FAIL %s\n",name); } \
     else printf("BADGE_TEST PASS %s\n",name); \
 } while (0)
 
+#ifndef BADGE_HOST_MOTION_SELFTEST
 static void still(badge_imu_filter_t *s, int64_t *now, int count, bool inhibited)
 {
     const float a[3]={0,-1,0},w[3]={0,0,0};
@@ -81,6 +84,8 @@ int badge_imu_filter_selftest(void)
     return failures;
 }
 
+#endif
+
 int badge_motion_selftest(void)
 {
     int failures=0;
@@ -110,9 +115,40 @@ int badge_motion_selftest(void)
     badge_motion_tick(&m,4440000,1,false);
     for (int i=1;i<=220;++i) badge_motion_tick(&m,4440000+i*50000LL,BADGE_NO_ACTION,false);
     CHECK(m.stage==MOTION_IDLE && m.completed==1 && m.frame==35,"normal jump completes seated");
+    const uint32_t standing_counts[3]={26,20,19};
+    badge_motion_init(&m,2,standing_counts,24);
+    m.standing_idle=true;
+    badge_motion_tick(&m,1000000,BADGE_NO_ACTION,false);
+    CHECK(m.stage==MOTION_IDLE && m.frame==18,"standing idle has no autoplay");
+    for (unsigned action=0;action<3;++action) {
+        int64_t start=2000000+action*3000000LL;
+        badge_motion_tick(&m,start,action,false);
+        CHECK(m.stage==MOTION_BLEND_ACTION && m.clip==action,"standing action blends directly from neutral");
+        bool frames_valid=true;
+        for (int i=1;i<=50;++i) {
+            badge_motion_tick(&m,start+i*50000LL,BADGE_NO_ACTION,false);
+            if (m.frame>=m.count[m.clip]) frames_valid=false;
+            if (m.stage==MOTION_IDLE) break;
+        }
+        CHECK(frames_valid,"standing frames stay inside clip");
+        CHECK(m.stage==MOTION_IDLE && m.clip==2 && m.frame==18 && m.completed==action+1,
+              "standing action returns to static neutral");
+    }
+    badge_motion_tick(&m,12000000,0,false);
+    badge_motion_tick(&m,12010000,1,false);
+    badge_motion_tick(&m,12020000,BADGE_NO_ACTION,true);
+    CHECK(m.stage==MOTION_DIZZY_ENTER && m.pending==BADGE_NO_ACTION && m.frame==18,
+          "standing shake cancels active and queued action");
+    badge_motion_tick(&m,12300000,2,false);
+    badge_motion_tick(&m,15020000,2,false);
+    badge_motion_tick(&m,15420000,2,false);
+    CHECK(m.stage==MOTION_IDLE && m.pending==BADGE_NO_ACTION && m.completed==3 && m.frame==18,
+          "standing dizzy recovers without resuming cancelled action");
     return failures;
 }
 
 #ifdef BADGE_HOST_SELFTEST
 int main(void) { return badge_imu_filter_selftest()+badge_motion_selftest(); }
+#elif defined(BADGE_HOST_MOTION_SELFTEST)
+int main(void) { return badge_motion_selftest(); }
 #endif

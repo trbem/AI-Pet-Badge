@@ -7,7 +7,7 @@ import zlib
 from prepare_badge_assets import HEADER, CLIP, FRAME, MAGIC, ROI, SIZE
 
 
-def validate(path: Path):
+def validate(path: Path, character: str = 'elysia'):
     data = path.read_bytes()
     magic, version, width, height, fps, clip_count, frame_count, x, y, bg, bg_length = HEADER.unpack_from(data)
     assert magic == MAGIC and version == 2, 'Rebuild assets with the v2 converter'
@@ -22,7 +22,8 @@ def validate(path: Path):
         names.append(name.rstrip(b'\0').decode('ascii'))
         assert count >= 2 and first+count <= frame_count
         coverage.extend(range(first, first+count))
-    assert set(names) == {'walk', 'jump', 'sit'}
+    expected = ['walk', 'jump', 'wave' if character == 'qinglan' else 'sit']
+    assert names == expected, f'Expected {character} clips {expected}, got {names}'
     assert sorted(coverage) == list(range(frame_count))
     end = bg+bg_length
     for i in range(frame_count):
@@ -38,10 +39,20 @@ def validate(path: Path):
                 assert raw[2*p:2*p+2] == b'\0\0', 'Transparent RGB must be zero'
         end = offset+length
     assert end == len(data), 'Unexpected trailing data'
+    if character == 'qinglan':
+        # Wave anchors also supply the static standing and dizzy neutral pose.
+        _, first, count = CLIP.unpack_from(data, HEADER.size+2*CLIP.size)
+        anchors = []
+        for i in (first, first+count-1):
+            offset, length = FRAME.unpack_from(data, table+i*FRAME.size)
+            anchors.append(zlib.decompress(data[offset:offset+length]))
+        assert anchors[0] == anchors[1], 'Standing anchors must match exactly'
     print(f'PASS v2: {frame_count} frames, {len(data):,} bytes, {fps} FPS, RGB565+A8')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('pack', type=Path)
-    validate(parser.parse_args().pack)
+    parser.add_argument('--character', choices=('elysia','qinglan'), default='elysia')
+    args = parser.parse_args()
+    validate(args.pack, args.character)

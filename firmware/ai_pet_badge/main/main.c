@@ -17,10 +17,16 @@
 #include "badge_imu_filter.h"
 #include "badge_motion.h"
 #include "badge_scene.h"
+#include "badge_character.h"
 
 static const char *TAG = "badge";
+#ifdef BADGE_CHARACTER_QINGLAN
+extern const uint8_t assets_start[] asm("_binary_qinglan_badge_start");
+extern const uint8_t assets_end[] asm("_binary_qinglan_badge_end");
+#else
 extern const uint8_t assets_start[] asm("_binary_animations_badge_start");
 extern const uint8_t assets_end[] asm("_binary_animations_badge_end");
+#endif
 
 typedef struct {
     char magic[8];
@@ -62,11 +68,13 @@ static esp_err_t check_assets(void)
         pack->background_length > length-end) return ESP_ERR_INVALID_SIZE;
     clips = (const pack_clip_t *)(assets_start+sizeof(*pack));
     frames = (const pack_frame_t *)(clips+pack->clip_count);
+    const char *expected_clips[] = {BADGE_CHARACTER_CLIPS};
     for (unsigned i = 0; i < pack->clip_count; ++i) {
         if (!memchr(clips[i].name,0,sizeof(clips[i].name)) || clips[i].count < 2 ||
             clips[i].first >= pack->frame_count || clips[i].count > pack->frame_count-clips[i].first)
             return ESP_ERR_INVALID_SIZE;
-        if (!strcmp(clips[i].name,"sit")) idle_clip = i;
+        if (strcmp(clips[i].name,expected_clips[i])) return ESP_ERR_INVALID_ARG;
+        if (!strcmp(clips[i].name,BADGE_CHARACTER_IDLE_CLIP)) idle_clip = i;
     }
     if (idle_clip == UINT32_MAX) return ESP_ERR_NOT_FOUND;
     size_t previous_end = end+pack->background_length;
@@ -112,11 +120,11 @@ static void print_status(void)
 {
     badge_imu_state_t imu; badge_imu_get(&imu);
     uint32_t queued = pending_clip;
-    printf("BADGE_STATUS {\"clip\":\"%s\",\"playing\":%s,\"stage\":\"%s\",\"action\":\"%s\",\"pending\":\"%s\","
+    printf("BADGE_STATUS {\"character\":\"" BADGE_CHARACTER_ID "\",\"standing_idle\":%s,\"clip\":\"%s\",\"playing\":%s,\"stage\":\"%s\",\"action\":\"%s\",\"pending\":\"%s\","
            "\"completed\":%u,\"late_frames\":%u,\"frame_index\":%u,\"frames\":%u,\"touches\":%u,"
            "\"decode_us\":%u,\"render_us\":%u,\"peak_render_us\":%u,\"heap\":%u,\"min_heap\":%u,\"psram\":%u,"
            "\"imu_available\":%s,\"angle\":%.2f,\"flat\":%s,\"shakes\":%u,\"dizzy\":%s}\n",
-           clips[current_clip].name,current_stage != MOTION_IDLE?"true":"false",badge_motion_names[current_stage],
+           BADGE_CHARACTER_STANDING?"true":"false",clips[current_clip].name,current_stage != MOTION_IDLE?"true":"false",badge_motion_names[current_stage],
            clips[active_action].name,queued < pack->clip_count?clips[queued].name:"",
            (unsigned)completed_actions,(unsigned)late_frames,(unsigned)current_frame,(unsigned)displayed_frames,
            (unsigned)touch_count,(unsigned)decode_time_us,(unsigned)render_time_us,(unsigned)peak_render_time_us,
@@ -191,6 +199,7 @@ static void animation_task(void *arg)
     assert(inflater);
     uint32_t counts[3]={clips[0].count,clips[1].count,clips[2].count};
     badge_motion_t motion; badge_motion_init(&motion,idle_clip,counts,pack->fps);
+    motion.standing_idle = BADGE_CHARACTER_STANDING;
     uint32_t revision=0, seen_shakes=0, decoded_key=UINT32_MAX, actor_key=UINT32_MAX, blend_epoch=0;
     bool initial=true, was_blending=false;
     int64_t active_benchmark=0;
@@ -312,5 +321,5 @@ void app_main(void)
     assert(xTaskCreatePinnedToCore(animation_task,"animation",8192,NULL,4,NULL,1)==pdPASS);
     assert(xTaskCreate(command_task,"commands",12288,NULL,2,NULL)==pdPASS);
     badge_network_start();
-    ESP_LOGI(TAG,"Elysia IMU dashboard ready; commands: STATUS, NEXT, DASH, SHOT, IMU, IMU CALIBRATE, IMU SELFTEST");
+    ESP_LOGI(TAG,"%s IMU dashboard ready; commands: STATUS, NEXT, DASH, SHOT, IMU, IMU CALIBRATE, IMU SELFTEST",BADGE_CHARACTER_ID);
 }
