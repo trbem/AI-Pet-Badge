@@ -3,7 +3,6 @@
 #include <stdio.h>
 #ifndef BADGE_HOST_MOTION_SELFTEST
 #include "badge_imu_filter.h"
-#include <math.h>
 #endif
 
 #define CHECK(condition, name) do { \
@@ -35,28 +34,19 @@ int badge_imu_filter_selftest(void)
     int64_t now=1000000;
     badge_imu_filter_init(&f,180);
     still(&f,&now,100,false);
-    CHECK(f.stable && !f.flat && fabsf(f.angle)<0.6f,"upright stable");
-    for (int i=1;i<=720;++i) {
-        float phi=i*0.5f*0.01745329252f;
-        float a[3]={-sinf(phi),-cosf(phi),0},w[3]={0,0,0.872664626f};
-        float previous=f.angle;
-        now+=10000; badge_imu_filter_step(&f,a,w,now,false);
-        if (fabsf(badge_imu_angle_delta(f.angle,previous))>5) ++failures;
+    CHECK(f.stable && !f.flat && f.angle==0 && f.armed,"upright arms shake without old calibration");
+    const float directions[8][3]={{0,-1,0},{-0.7071068f,-0.7071068f,0},{-1,0,0},
+        {-0.7071068f,0.7071068f,0},{0,1,0},{0.7071068f,0.7071068f,0},{1,0,0},{0,0,1}};
+    const float gyro[3]={100,-80,30};
+    bool fixed=true;
+    for (int turn=0;turn<3;++turn) for (int pose=0;pose<8;++pose) for (int i=0;i<30;++i) {
+        now+=10000; badge_imu_filter_step(&f,directions[pose],gyro,now,false);
+        if (f.angle!=0 || f.dx!=0 || f.dy!=0 || f.lean!=0) fixed=false;
     }
-    printf("BADGE_TEST rotation_lag_deg %.3f expected 6.0 (50 dps * 120 ms)\n",f.angle);
-    CHECK(fabsf(badge_imu_angle_delta(f.angle,6))<1.5f,"continuous 360 crossing and smoothing lag");
-    CHECK(f.shakes==0,"slow rotation does not shake");
-    still(&f,&now,180,false);
-    CHECK(fabsf(f.angle)<0.6f && fabsf(f.dx)<0.1f && fabsf(f.lean)<0.1f,"settled pose returns neutral");
-    badge_imu_filter_init(&f,0);
-    f.angle=73;
-    float a[3]={0,0,1},w[3]={0,0,0};
-    for (int i=0;i<200;++i) { now+=10000; badge_imu_filter_step(&f,a,w,now,false); }
-    CHECK(f.flat && f.angle==73,"flat holds last orientation");
-    badge_imu_filter_lost(&f);
-    CHECK(f.angle==73 && !f.initialized,"disconnect preserves angle");
-    badge_imu_filter_init(&f,180);
-    still(&f,&now,100,false);
+    CHECK(fixed,"all orientations keep screen and character fixed");
+    CHECK(f.shakes==0,"orientation changes do not trigger stars");
+    CHECK(f.gyro[0]==0 && f.gyro[1]==0 && f.gyro[2]==0,"gyro input is ignored");
+    badge_imu_filter_init(&f,0); still(&f,&now,100,false);
     CHECK(shake(&f,&now,false)==1,"opposite peaks trigger once");
     CHECK(shake(&f,&now,true)==0,"dizzy suppresses repeat shake");
     still(&f,&now,100,false);
@@ -65,22 +55,35 @@ int badge_imu_filter_selftest(void)
     CHECK(shake(&f,&now,false)==1,"quiet cooldown rearms");
     badge_imu_filter_init(&f,180);
     still(&f,&now,100,false);
-    a[0]=1.8f;a[1]=-1;a[2]=0;
-    for (int i=0;i<8;++i) { now+=10000; badge_imu_filter_step(&f,a,w,now,false); }
+    float a[3]={1.8f,-1,0};
+    for (int i=0;i<8;++i) { now+=10000; badge_imu_filter_step(&f,a,NULL,now,false); }
     still(&f,&now,100,false);
     CHECK(f.shakes==0,"single pickup impulse does not shake");
     now+=2000000;
     a[0]=0; a[1]=-1;
-    badge_imu_filter_step(&f,a,w,now,false);
-    CHECK(isfinite(f.angle) && fabsf(f.angle)<0.6f,"long sample gap resets estimator safely");
-    badge_imu_filter_init(&f,180);
-    still(&f,&now,100,false);
-    for (int i=1;i<=180;++i) {
-        float p=i*0.5f*0.01745329252f;
-        a[0]=0;a[1]=-cosf(p);a[2]=sinf(p);w[0]=0.872664626f;
-        now+=10000;badge_imu_filter_step(&f,a,w,now,false);
+    badge_imu_filter_step(&f,a,NULL,now,false);
+    CHECK(f.angle==0 && !f.armed && f.shakes==0,"long sample gap resets shake arming safely");
+    badge_imu_filter_init(&f,0); still(&f,&now,100,false);
+    for (int i=0;i<8;++i) { a[0]=1.8f; now+=10000; badge_imu_filter_step(&f,a,NULL,now,false); }
+    still(&f,&now,75,false);
+    for (int i=0;i<8;++i) { a[0]=-1.8f; now+=10000; badge_imu_filter_step(&f,a,NULL,now,false); }
+    CHECK(f.shakes==0,"peaks outside 600ms do not pair");
+    badge_imu_filter_init(&f,0); still(&f,&now,100,false);
+    for (int i=0;i<18;++i) {
+        a[0]=0; a[1]=-1+(i<8?1.8f:-1.8f); a[2]=0;
+        now+=10000; badge_imu_filter_step(&f,a,NULL,now,false);
     }
-    CHECK(f.flat && f.shakes==0,"tilt into flat locks without false shake");
+    CHECK(f.shakes==1,"vertical opposite peaks trigger");
+    badge_imu_filter_init(&f,0);
+    for (int i=0;i<100;++i) { a[0]=a[1]=0; a[2]=1; now+=10000; badge_imu_filter_step(&f,a,NULL,now,false); }
+    for (int i=0;i<18;++i) { a[0]=i<8?1.8f:-1.8f; now+=10000; badge_imu_filter_step(&f,a,NULL,now,false); }
+    CHECK(f.shakes==1 && f.flat,"flat shake still triggers without rotating screen");
+    badge_imu_filter_lost(&f);
+    CHECK(!f.armed && !f.initialized && f.shakes==1 && f.angle==0,"disconnect clears peaks but preserves shake count");
+    const float zero[3]={0,0,0};
+    CHECK(!badge_imu_filter_step(&f,zero,NULL,now+10000,false),"invalid acceleration is rejected");
+    const float clipped[3]={7.9998f,7.9998f,7.9998f};
+    CHECK(!badge_imu_accel_valid(clipped),"stuck all-axis saturation is rejected");
     return failures;
 }
 

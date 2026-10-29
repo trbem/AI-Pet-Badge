@@ -16,7 +16,7 @@ def main():
     parser.add_argument("--port", required=True)
     parser.add_argument("--seconds", type=float, default=10)
     parser.add_argument("--reset", action="store_true")
-    parser.add_argument("--command", choices=("STATUS", "NEXT", "TONE", "DASH", "IMU", "IMU CALIBRATE", "IMU SELFTEST", "IMU BENCH"))
+    parser.add_argument("--command", choices=("STATUS", "NEXT", "TONE", "DASH", "SD", "IMU", "IMU CALIBRATE", "IMU SELFTEST", "IMU BENCH"))
     parser.add_argument("--sync-time", action="store_true", help="Set the clock from this computer and update the board RTC")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()

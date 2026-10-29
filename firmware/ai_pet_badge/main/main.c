@@ -18,6 +18,7 @@
 #include "badge_motion.h"
 #include "badge_scene.h"
 #include "badge_character.h"
+#include "badge_storage.h"
 
 static const char *TAG = "badge";
 #ifdef BADGE_CHARACTER_QINGLAN
@@ -120,11 +121,11 @@ static void print_status(void)
 {
     badge_imu_state_t imu; badge_imu_get(&imu);
     uint32_t queued = pending_clip;
-    printf("BADGE_STATUS {\"character\":\"" BADGE_CHARACTER_ID "\",\"standing_idle\":%s,\"clip\":\"%s\",\"playing\":%s,\"stage\":\"%s\",\"action\":\"%s\",\"pending\":\"%s\","
+    printf("BADGE_STATUS {\"character\":\"" BADGE_CHARACTER_ID "\",\"imu_mode\":\"shake_only\",\"orientation_enabled\":false,\"sd_mounted\":%s,\"standing_idle\":%s,\"clip\":\"%s\",\"playing\":%s,\"stage\":\"%s\",\"action\":\"%s\",\"pending\":\"%s\","
            "\"completed\":%u,\"late_frames\":%u,\"frame_index\":%u,\"frames\":%u,\"touches\":%u,"
            "\"decode_us\":%u,\"render_us\":%u,\"peak_render_us\":%u,\"heap\":%u,\"min_heap\":%u,\"psram\":%u,"
            "\"imu_available\":%s,\"angle\":%.2f,\"flat\":%s,\"shakes\":%u,\"dizzy\":%s}\n",
-           BADGE_CHARACTER_STANDING?"true":"false",clips[current_clip].name,current_stage != MOTION_IDLE?"true":"false",badge_motion_names[current_stage],
+           badge_storage_mounted()?"true":"false",BADGE_CHARACTER_STANDING?"true":"false",clips[current_clip].name,current_stage != MOTION_IDLE?"true":"false",badge_motion_names[current_stage],
            clips[active_action].name,queued < pack->clip_count?clips[queued].name:"",
            (unsigned)completed_actions,(unsigned)late_frames,(unsigned)current_frame,(unsigned)displayed_frames,
            (unsigned)touch_count,(unsigned)decode_time_us,(unsigned)render_time_us,(unsigned)peak_render_time_us,
@@ -173,10 +174,11 @@ static void command_task(void *arg)
             else if (!strcmp(line,"DASH")) badge_dashboard_status();
             else if (!strcmp(line,"SHOT")) badge_dashboard_snapshot();
             else if (!strcmp(line,"IMU")) badge_imu_status();
+            else if (!strcmp(line,"SD")) badge_storage_status();
             else if (!strcmp(line,"IMU CALIBRATE")) badge_imu_calibrate();
             else if (!strcmp(line,"IMU BENCH")) {
                 portENTER_CRITICAL(&request_mux); benchmark_start=esp_timer_get_time(); portEXIT_CRITICAL(&request_mux);
-                printf("BADGE_BENCHMARK started: ten seconds of rotation and dizzy effects\n");
+                printf("BADGE_BENCHMARK started: ten seconds of dizzy effects; fixed screen\n");
             }
             else if (!strcmp(line,"IMU SELFTEST")) {
                 int failures=badge_imu_filter_selftest()+badge_motion_selftest()+badge_scene_selftest();
@@ -264,13 +266,11 @@ static void animation_task(void *arg)
         }
         float strength=badge_motion_dizzy_strength(&motion,now);
         float phase=(now-motion.dizzy_us)*0.000001f;
-        float attenuation=motion.stage == MOTION_IDLE?1:0.35f;
-        float dx=imu.dx*attenuation,dy=imu.dy*attenuation,lean=imu.lean*attenuation;
+        float dx=0,dy=0,lean=0;
         if (dizzy) { lean+=6*sinf(phase*9)*strength; dx+=1.5f*sinf(phase*7)*strength; }
-        float orientation=imu.angle;
+        const float orientation=0;
         if (benchmark) {
             phase=(now-benchmark)*0.000001f;
-            orientation+=phase*120;
             strength=1; lean=6*sinf(phase*9); dx=1.5f*sinf(phase*7);
         }
         if (badge_scene_present(actor,pose_changed,dx,dy,lean,orientation,strength,phase)) ++displayed_frames;
@@ -318,6 +318,7 @@ void app_main(void)
     badge_scene_init(background);
     bsp_display_unlock();
     badge_dashboard_start(); badge_imu_start();
+    badge_storage_start();
     assert(xTaskCreatePinnedToCore(animation_task,"animation",8192,NULL,4,NULL,1)==pdPASS);
     assert(xTaskCreate(command_task,"commands",12288,NULL,2,NULL)==pdPASS);
     badge_network_start();

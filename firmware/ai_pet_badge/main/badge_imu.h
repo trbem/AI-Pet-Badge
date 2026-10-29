@@ -4,6 +4,7 @@
 
 typedef struct {
     bool available, flat, stable, calibrated;
+    uint8_t sensor_enable;
     float angle, dx, dy, lean;
     float accel[3], gyro[3], gravity[3];
     uint32_t shakes, errors;
